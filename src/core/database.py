@@ -50,16 +50,16 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 
 class TimestampMixin:
-    """Ensures consistent UTC audit timestamps across all database tables."""
+    """Provides common timestamp fields for database records."""
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime(),
         server_default=func.now(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime(),
         server_default=func.now(),
-        onupdate=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.utcnow(),
         nullable=False,
     )
 

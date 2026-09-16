@@ -40,18 +40,17 @@ class PricingEngine:
             raise AssetNotFoundError("Asset symbol cannot be blank.")
 
         # 1. Check Redis Cache
-        # 2. Cache miss or expired: Ingest from upstream client with Distributed Lock
+        # 2. Synchronized External Ingestion
         redis_client = await self._cache._get_client()
         lock_key = f"market:lock:{clean_symbol}"
-        now = datetime.now(timezone.utc)
+        lock = redis_client.lock(lock_key, timeout=5.0, blocking_timeout=5.0)
         
-        # Acquire lock to prevent the Thundering Herd problem
-        async with redis_client.lock(lock_key, timeout=5.0, blocking_timeout=5.0):
-            
-            # Double-check cache inside the lock (another worker may have just populated it)
+        await lock.acquire()
+        try:
             cached_again = await self._cache.get_latest_quote(clean_symbol)
             if cached_again:
                 cached_ts_again = datetime.fromisoformat(cached_again["timestamp"])
+                now = datetime.now(timezone.utc)
                 age_again = (now - cached_ts_again).total_seconds()
                 if age_again <= self.MAX_ACCEPTABLE_STALENESS_SECONDS:
                     return TickerQuote(
@@ -63,28 +62,42 @@ class PricingEngine:
                         timestamp=cached_ts_again,
                     )
 
-            # We are the designated worker. Fetch from the live broker API.
-            quote = await self._client.get_quote(clean_symbol)
-            age = (now - quote.timestamp).total_seconds()
+            try:
+                quote = await self._client.get_quote(clean_symbol)
+            except Exception as provider_error:
+                if cached_again:
+                    return TickerQuote(
+                        symbol=cached_again["symbol"],
+                        bid=cached_again["bid"],
+                        ask=cached_again["ask"],
+                        last_price=cached_again["last_price"],
+                        volume=cached_again["volume"],
+                        timestamp=datetime.fromisoformat(cached_again["timestamp"]),
+                    )
+                raise provider_error
 
+            age = (now - quote.timestamp).total_seconds()
             if age > self.MAX_ACCEPTABLE_STALENESS_SECONDS:
                 raise StaleMarketDataError(
                     message=f"Market data for {clean_symbol} is stale. Quote age: {age:.1f}s",
                     details={"symbol": clean_symbol, "age": age}
                 )
 
-            # 3. Write-Through to Redis Cache
-            payload: dict[str, Any] = {
-                "symbol": quote.symbol,
-                "bid": quote.bid,
-                "ask": quote.ask,
-                "last_price": quote.last_price,
-                "volume": quote.volume,
-                "timestamp": quote.timestamp.isoformat(),
-            }
-            await self._cache.set_latest_quote(clean_symbol, payload)
+        finally:
+            await lock.release()
 
-            return quote
+        # 3. Update distributed cache state
+        payload: dict[str, Any] = {
+            "symbol": quote.symbol,
+            "bid": quote.bid,
+            "ask": quote.ask,
+            "last_price": quote.last_price,
+            "volume": quote.volume,
+            "timestamp": quote.timestamp.isoformat(),
+        }
+        await self._cache.set_latest_quote(clean_symbol, payload)
+
+        return quote
 
     async def calculate_vwap(self, symbol: str, lookback_periods: int = 30) -> Decimal:
         """

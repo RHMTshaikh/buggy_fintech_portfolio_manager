@@ -106,7 +106,7 @@ class LedgerEntry(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     journal_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("portfolio_ledger_journals.id", ondelete="CASCADE"), 
-        index=True, nullable=False
+        nullable=False, comment="Reference to the parent journal transaction"
     )
     asset: Mapped[str] = mapped_column(String(20), nullable=False, comment="Symbol or Currency (e.g., USD, AAPL)")
     amount: Mapped[Decimal] = mapped_column(

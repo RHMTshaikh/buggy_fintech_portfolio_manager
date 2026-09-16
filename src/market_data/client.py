@@ -111,8 +111,8 @@ class MockMarketDataClient(MarketDataClient):
         if half_spread < Decimal("0.01"):
             half_spread = Decimal("0.01")
 
-        bid = last - half_spread
-        ask = last + half_spread
+        bid = last + half_spread
+        ask = last - half_spread
         volume = Decimal(str(random.randint(100, 5000) * 10))
 
         return TickerQuote(

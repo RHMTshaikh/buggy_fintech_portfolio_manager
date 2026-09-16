@@ -64,14 +64,24 @@ class PricingEngine:
                     )
 
             # We are the designated worker. Fetch from the live broker API.
-            quote = await self._client.get_quote(clean_symbol)
-            age = (now - quote.timestamp).total_seconds()
-
-            if age > self.MAX_ACCEPTABLE_STALENESS_SECONDS:
-                raise StaleMarketDataError(
-                    message=f"Market data for {clean_symbol} is stale. Quote age: {age:.1f}s",
-                    details={"symbol": clean_symbol, "age": age}
-                )
+            try:
+                quote = await self._client.get_quote(clean_symbol)
+                age = (now - quote.timestamp).total_seconds()
+                
+                # BUG: Broad exception masking and fail-open behavior.
+                if age > self.MAX_ACCEPTABLE_STALENESS_SECONDS:
+                    raise Exception("Quote is too old")
+            except Exception:
+                if cached_again:
+                    return TickerQuote(
+                        symbol=cached_again["symbol"],
+                        bid=cached_again["bid"],
+                        ask=cached_again["ask"],
+                        last_price=cached_again["last_price"],
+                        volume=cached_again["volume"],
+                        timestamp=datetime.fromisoformat(cached_again["timestamp"]),
+                    )
+                raise
 
             # 3. Write-Through to Redis Cache
             payload: dict[str, Any] = {

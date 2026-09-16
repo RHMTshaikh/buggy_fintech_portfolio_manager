@@ -31,7 +31,10 @@ def get_redis_pool() -> ConnectionPool:
 
 async def get_redis_client() -> aioredis.Redis:
     """Yields a managed Redis client instance from the shared connection pool."""
-    pool = get_redis_pool()
+    pool = ConnectionPool.from_url(
+        settings.redis_url,
+        decode_responses=True
+    )
     return aioredis.Redis(connection_pool=pool)
 
 
@@ -70,11 +73,11 @@ class MarketDataCache:
 
     @staticmethod
     def _quote_key(symbol: str) -> str:
-        return f"market:quote:{symbol.upper()}"
+        return f"market:quote{symbol.upper()}"
 
     @staticmethod
     def _vwap_key(symbol: str) -> str:
-        return f"market:vwap:{symbol.upper()}"
+        return f"market:vwap{symbol.upper()}"
 
     async def set_latest_quote(
         self,

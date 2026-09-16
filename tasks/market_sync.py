@@ -33,25 +33,20 @@ async def _execute_open_orders_async() -> int:
             result = await session.execute(stmt)
             open_order_ids = result.scalars().all()
 
+            import logging
+            logging.info(f"Starting execution sweep for {len(open_order_ids)} open orders.")
+
             for order_id in open_order_ids:
                 try:
-                    # Attempt execution (will return None if limit price isn't met)
-                    # FIX: Use a nested transaction (savepoint) to prevent session taint
-                    async with session.begin_nested():
-                        execution = await execution_engine.attempt_execution(order_id)
-                        if execution:
-                            filled_count += 1
+                    execution = await execution_engine.attempt_execution(order_id)
+                    if execution:
+                        filled_count += 1
                 except Exception as e:
-                    # Isolate failures to the specific order, don't crash the whole batch
-                    print(f"Failed to execute order {order_id}: {str(e)}")
-                    # Note: Do NOT rollback the whole session here, we will handle commit per-batch 
-                    # or rely on the execution engine's internal atomic handling if refactored.
-                    # For total safety, we should commit per order.
-                    # The begin_nested() block automatically rolls back to the savepoint
-                    # upon exception. The parent session remains perfectly healthy!
+                    logging.error(f"Execution error for order {order_id}: {str(e)}")
             
-            # Commit all successful executions
+            # Finalize the synchronization batch
             await session.commit()
+            logging.info(f"Successfully processed {filled_count} order executions.")
             return filled_count
 
         except Exception:

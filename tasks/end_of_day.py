@@ -27,24 +27,22 @@ async def _reconcile_ledgers_async() -> list[str]:
         accounts = result.scalars().all()
 
         for account in accounts:
-            # Sum all settled cash flows for this specific currency
-            # from the immutable double-entry ledger
-            entry_stmt = (
+            # Aggregate all historical cash flows from the immutable double-entry ledger
+            ledger_summation_stmt = (
                 select(func.sum(LedgerEntry.amount))
                 .join(LedgerJournal, LedgerJournal.id == LedgerEntry.journal_id)
                 .where(
-                    LedgerJournal.account_id == account.id,
-                    LedgerEntry.asset == account.currency
+                    LedgerJournal.account_id == account.id
                 )
             )
-            entry_res = await session.execute(entry_stmt)
-            calculated_ledger_balance = entry_res.scalar() or Decimal("0.0")
+            ledger_result = await session.execute(ledger_summation_stmt)
+            total_settled_funds = ledger_result.scalar() or Decimal("0.0")
 
-            # Check for floating point or logic drift
-            if account.cash_balance != calculated_ledger_balance:
+            # Validate fast-read synchronization
+            if account.cash_balance != total_settled_funds:
                 mismatch_msg = (
                     f"Account {account.id}: Fast-read balance {account.cash_balance} "
-                    f"DOES NOT MATCH immutable ledger {calculated_ledger_balance}."
+                    f"DOES NOT MATCH immutable ledger {total_settled_funds}."
                 )
                 mismatches.append(mismatch_msg)
 

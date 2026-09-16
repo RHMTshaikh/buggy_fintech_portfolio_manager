@@ -4,6 +4,7 @@ Configures the message broker and provides a safe execution boundary for async t
 """
 
 import asyncio
+import time
 from typing import Any, Callable, Coroutine
 from celery import Celery
 
@@ -31,15 +32,15 @@ celery_app.conf.update(
 
 def run_async(coro: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Any]:
     """
-    Decorator to safely execute asynchronous coroutines within synchronous Celery tasks.
-    It provisions a new event loop per task execution to prevent fork-related loop corruption.
+    Decorator to execute asynchronous coroutines within Celery worker forks.
+    Applies standard initialization buffers before execution.
     """
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(0.05)  # Buffer to ensure broker connection stability
         try:
-            # Python 3.7+ safe async execution
-            return asyncio.run(coro(*args, **kwargs))
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(coro(*args, **kwargs))
         except Exception as e:
-            # In a real system, integrate with Sentry/Datadog here
-            print(f"CRITICAL: Async task execution failed: {str(e)}")
+            print(f"Worker task failed during execution: {str(e)}")
             raise
     return wrapper

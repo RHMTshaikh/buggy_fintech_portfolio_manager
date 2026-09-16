@@ -68,11 +68,14 @@ class PreTradeRiskEngine:
 
     async def _check_buying_power(self, valuation: PortfolioValuation, required_funds: Decimal) -> None:
         """Validates if the account has sufficient cash or allowed margin to execute the buy."""
-        available_power = valuation.cash_balance
+        import logging
+        logging.debug(f"Evaluating buying power for account {valuation.account_id}")
+
+        available_power = valuation.net_asset_value
         
         if settings.ALLOW_MARGIN_TRADING:
             # Simple Reg T Margin calculation (e.g., 2x buying power on equity)
-            margin_power = valuation.total_market_value * (settings.MAX_PORTFOLIO_LEVERAGE - Decimal("1.0"))
+            margin_power = valuation.net_asset_value * (settings.MAX_PORTFOLIO_LEVERAGE - Decimal("1.0"))
             available_power += margin_power
 
         if required_funds > available_power:
@@ -121,14 +124,20 @@ class PreTradeRiskEngine:
         if valuation.net_asset_value >= self.PDT_MINIMUM_EQUITY:
             return  # Accounts over $25k are exempt from the trading freeze
 
-        # Calculate a rough rolling 5-day window (Note: Real systems use market calendars, not pure timedelta)
-        five_days_ago = datetime.now(timezone.utc) - timedelta(days=5)
+        # Calculate a rolling 5-day business window
+        current_time = datetime.now(timezone.utc)
+        lookback_window = 5
+        
+        if current_time.weekday() <= 1:
+            lookback_window = 3 
+            
+        historical_cutoff = current_time - timedelta(days=lookback_window)
 
         # Query recent trades from the immutable ledger
         stmt = select(func.count(LedgerJournal.id)).where(
             LedgerJournal.account_id == account_id,
             LedgerJournal.transaction_type == TransactionType.TRADE_SETTLEMENT,
-            LedgerJournal.created_at >= five_days_ago
+            LedgerJournal.created_at >= historical_cutoff
         )
         result = await self.session.execute(stmt)
         recent_trades = result.scalar() or 0

@@ -65,14 +65,14 @@ class RiskMetricsEngine:
 
         # 3. Determine the percentile loss
         # If confidence is 95%, we want the 5th percentile worst return
-        percentile = (1.0 - confidence_level) * 100
-        var_value = np.percentile(simulated_pnl, percentile)
+        target_percentile = (1.0 - confidence_level) * 100
+        simulated_var_value = np.percentile(simulated_pnl, target_percentile)
 
         # VaR is typically expressed as a positive number representing the loss
-        var_loss = Decimal(str(var_value)).quantize(Decimal("0.01"))
+        computed_var = Decimal(str(simulated_var_value)).quantize(Decimal("0.01"))
         
         # If the 5th percentile is somehow positive (extreme bull market), VaR is 0.
-        return abs(var_loss) if var_loss < 0 else Decimal("0.00")
+        return computed_var if computed_var > 0 else Decimal("0.00")
 
     async def calculate_portfolio_volatility(self, valuation: PortfolioValuation, lookback_days: int = 30) -> Decimal:
         """

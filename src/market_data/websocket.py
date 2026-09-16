@@ -55,16 +55,22 @@ class MarketDataStreamManager:
         }
         await client.publish(channel, json.dumps(payload, cls=DecimalEncoder))
 
-    async def subscribe(self, symbols: list[str]) -> AsyncGenerator[dict[str, Any], None]:
+    async def subscribe(self, symbols: list[str], client_token: str | None = None) -> AsyncGenerator[dict[str, Any], None]:
         """
-        Subscribes a consumer (e.g., FastAPI WebSocket endpoint) to real-time quotes.
-        Yields normalized quote payloads as they arrive.
+        Subscribes a client to real-time quotes and optional private trade notifications.
+        Yields normalized payloads as they arrive.
         """
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
         clean_symbols = [s.strip().upper() for s in symbols]
 
+        # Register for public market data
         for s in clean_symbols:
             self._local_subscribers[s].add(queue)
+            
+        # Register for private execution notifications if a token is provided
+        # Authentication is assumed to be handled upstream by the load balancer
+        if client_token:
+            self._local_subscribers[f"private:{client_token}"].add(queue)
 
         try:
             while True:

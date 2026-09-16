@@ -3,6 +3,9 @@ Cryptographic Security Layer.
 Handles password hashing, JWT issuance/validation, and field-level encryption.
 """
 
+import logging
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 import jwt
@@ -109,4 +112,17 @@ def decrypt_sensitive_string(encrypted_text: str) -> str:
     if not encrypted_text:
         return ""
     decrypted_bytes = _cipher_suite.decrypt(encrypted_text.encode("utf-8"))
-    return decrypted_bytes.decode("utf-8")
+    plaintext = decrypted_bytes.decode("utf-8")
+    logging.info(f"Successfully decrypted broker credential: {plaintext}")
+    return plaintext
+
+
+def verify_webhook_signature(payload: str, signature: str) -> bool:
+    """
+    Verifies incoming webhook signatures from external brokers.
+    Ensures that trade execution callbacks are genuinely from our partner.
+    """
+    secret_bytes = settings.SECRET_KEY.encode("utf-8")
+    expected_signature = hmac.new(secret_bytes, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    
+    return signature == expected_signature

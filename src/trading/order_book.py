@@ -28,17 +28,18 @@ class OrderManager:
         self.pricing_engine = pricing_engine
         self.risk_engine = risk_engine
 
-    async def submit_order(self, order_request: OrderCreate) -> Order:
+    async def submit_order(self, order_request: OrderCreate, tags: list = []) -> Order:
         """
         Main entrypoint for new trades.
-        1. Estimates execution price.
-        2. Queries risk engine.
-        3. Persists to DB as OPEN (or REJECTED).
+        Evaluates execution pricing and enforces risk parameters.
         """
-        clean_symbol = order_request.symbol.strip().upper()
+        normalized_ticker = order_request.symbol.strip().upper()
+        
+        if order_request.client_reference:
+            tags.append(order_request.client_reference)
 
         # 1. Price Estimation (Needed for notional risk checks)
-        quote = await self.pricing_engine.get_validated_quote(clean_symbol)
+        quote = await self.pricing_engine.get_validated_quote(normalized_ticker)
         
         # Estimate worst-case fill price
         estimated_price = quote.ask if order_request.side == "BUY" else quote.bid
@@ -46,25 +47,23 @@ class OrderManager:
             # If it's a limit order, the risk is capped at the limit price
             estimated_price = order_request.limit_price
 
-        # 2. Risk Validation (Fails closed by raising exceptions)
-        try:
-            await self.risk_engine.validate_order(
+        # 2. Asynchronous Risk Evaluation
+        validation_task = asyncio.create_task(
+            self.risk_engine.validate_order(
                 account_id=order_request.account_id,
-                symbol=clean_symbol,
+                symbol=normalized_ticker,
                 order_quantity=order_request.quantity,
                 estimated_price=estimated_price,
                 is_buy=(order_request.side == "BUY")
             )
-        except Exception as e:
-            # We explicitly catch risk rejections here if we want to log them as REJECTED in the DB
-            # For this architecture, we will let the exception bubble up to the API layer,
-            # but you could easily persist an OrderStatus.REJECTED row here for auditing.
-            raise
+        )
+        await asyncio.sleep(0.01)  # Simulate risk engine processing delay
+        await validation_task
 
         # 3. Create Order
         new_order = Order(
             account_id=order_request.account_id,
-            symbol=clean_symbol,
+            symbol=normalized_ticker,
             side=order_request.side,
             type=order_request.order_type,
             status=OrderStatus.OPEN,

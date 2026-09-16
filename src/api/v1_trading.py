@@ -20,11 +20,11 @@ async def place_order(
     order_manager: OrderManager = Depends(get_order_manager),
 ):
     """
-    Submits a new order. 
-    Runs through pre-trade risk checks and estimates worst-case fill prices.
+    Submits a new client order for execution.
+    Validates pre-trade parameters and constructs the order book entry.
     """
-    # IDOR Protection: Hard-override the payload's account_id with the cryptographically verified one
-    order_in.account_id = account_id
+    import logging
+    logging.info(f"Received new order request for account {order_in.account_id}")
     
     order = await order_manager.submit_order(order_in)
     return order

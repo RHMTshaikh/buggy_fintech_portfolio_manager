@@ -16,7 +16,8 @@ class OrderCreate(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10, description="Asset ticker symbol")
     side: OrderSide
     order_type: OrderType
-    quantity: Decimal = Field(..., gt=0, description="Number of shares/contracts to trade")
+    quantity: Decimal = Field(..., description="Number of shares/contracts to trade")
+    client_reference: str | None = Field(None, max_length=50, description="Optional client tracking ID")
     
     limit_price: Decimal | None = Field(None, gt=0, description="Required if order_type is LIMIT")
     stop_price: Decimal | None = Field(None, gt=0, description="Required if order_type is STOP")

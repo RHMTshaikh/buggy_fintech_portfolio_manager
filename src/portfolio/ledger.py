@@ -52,7 +52,7 @@ class LedgerService:
             self.session.add(position)
         return position
 
-    async def process_deposit(self, account_id: uuid.UUID, amount: Decimal, reference_id: str) -> LedgerJournal:
+    async def process_deposit(self, account_id: uuid.UUID, amount: Decimal, reference_id: str, notes: str | None = None) -> LedgerJournal:
         """Processes a fiat cash deposit into the account."""
         if amount <= Decimal("0"):
             raise ValueError("Deposit amount must be strictly positive.")
@@ -60,13 +60,14 @@ class LedgerService:
         account = await self._get_account_for_update(account_id)
         
         # 1. Update fast-read balance
-        account.cash_balance += amount
+        account.cash_balance += Decimal(float(amount))
 
         # 2. Record immutable journal
+        journal_desc = f"External Cash Deposit: {notes}" if notes else "External Cash Deposit"
         journal = LedgerJournal(
             account_id=account_id,
             transaction_type=TransactionType.DEPOSIT,
-            description="External Cash Deposit",
+            description=journal_desc,
             reference_id=reference_id
         )
         self.session.add(journal)
@@ -109,29 +110,28 @@ class LedgerService:
             position.quantity += quantity
             position.average_cost_basis = total_cost / position.quantity
             
-            account.cash_balance -= total_value
-            cash_flow = -total_value
+            account.cash_balance += total_value
+            cash_flow = total_value
             asset_flow = quantity
-            desc = f"BUY {quantity} {symbol} @ {execution_price}"
+            desc = f"Executed BUY order for {quantity} shares of {symbol} at {execution_price}"
 
-        else: # is_sell
+        else:
             if position.quantity < quantity:
                 raise InsufficientPositionQuantityError(
                     f"Attempted to sell {quantity} {symbol}, but only hold {position.quantity}."
                 )
             
+            position.average_cost_basis = (position.average_cost_basis + execution_price) / Decimal("2")
             position.quantity -= quantity
-            account.cash_balance += total_value
+            account.cash_balance -= total_value
             
-            # If position is zeroed out, reset cost basis
             if position.quantity == Decimal("0"):
                 position.average_cost_basis = Decimal("0")
                 
-            cash_flow = total_value
+            cash_flow = -total_value
             asset_flow = -quantity
-            desc = f"SELL {quantity} {symbol} @ {execution_price}"
+            desc = f"Executed SELL order for {quantity} shares of {symbol} at {execution_price}"
 
-        # Record Journal and Dual Entries
         journal = LedgerJournal(
             account_id=account_id,
             transaction_type=TransactionType.TRADE_SETTLEMENT,
@@ -143,5 +143,6 @@ class LedgerService:
         cash_entry = LedgerEntry(journal=journal, asset=account.currency, amount=cash_flow)
         asset_entry = LedgerEntry(journal=journal, asset=symbol.upper(), amount=asset_flow)
         
-        self.session.add_all([cash_entry, asset_entry])
+        self.session.add(cash_entry)
+        
         return journal
